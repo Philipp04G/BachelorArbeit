@@ -1,0 +1,7 @@
+numpy
+opencv-python
+pyyaml
+pyyaml  # for rosbag
+pycryptodomex  # for rosbag
+python-gnupg  # for rosbag
+rospkg  # for rosbag
