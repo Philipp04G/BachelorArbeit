@@ -4,19 +4,18 @@ import csv
 import os
 from ultralytics import YOLO
 
-# --- IMPORTS DEINER MODULE ---
+# --- IMPORTS DER MODULE ---
 from samson_data_reader.data_reader import DataReader
 from samson_data_reader.datacalsses import ImageData
 
 # --- KONFIGURATION (PFADE ANPASSEN!) ---
-# Nutze r"" Strings für Windows Pfade!
 DATA_DIR = r"C:\Studium\BA_Projekt\DATEN"
 MODEL_PATH = r"C:\Studium\BA_Projekt\BachelorArbeit\YOLO_Modell\baum_thesis\versuch_3_higherRes_Aug_300Epochs\weights\best.pt"
 PATH_CALIB = r"C:\Studium\BA_Projekt\BachelorArbeit\SAMSON4_SAMSON3_stereo.yaml"
 
 # --- EINSTELLUNGEN ---
 CSV_FILENAME = "gefundene_baeume.csv"
-TARGET_CLASS = 'trunk'  # <--- HIER DEN GENAUEN NAMEN AUS DEINEM DATENSATZ EINTRAGEN!
+TARGET_CLASS = 'trunk' # <--- HIER DEN GENAUEN NAMEN AUS DEM DATENSATZ EINTRAGEN!
 X_THRESHOLD = 30       # Pixel: Wie weit dürfen Segmente seitlich versetzt sein?
 CONFIDENCE = 0.25      # YOLO Sicherheitsschwelle
 ROTATE_IMAGE = True    # True, wenn Bilder um 90° gedreht werden müssen
@@ -184,7 +183,8 @@ def main():
                         u_orig, v_orig = u_curr, v_curr
 
                     # --- D. SKALIERUNG FÜR TIEFENKARTE ---
-                    # Das Originalbild ist z.B. 1000x1000, die Map aber nur 200x200
+                    # Das Originalbild ist z.B. 1000x1000, die Map aber nur 200x200 
+                    # TODO !!!!! Vielleicht hier ein fehler??????
                     h_img, w_img = image.shape[:2]
                     h_map, w_map = depth_map.shape[:2]
                     
@@ -209,7 +209,7 @@ def main():
                         continue
 
                     # --- F. 3D BERECHNUNG ---
-                    # Wir nutzen u_orig/v_orig (großes Bild) mit fx/fy (große Kalibrierung)
+                    # u_orig/v_orig (großes Bild) mit fx/fy (große Kalibrierung)
                     x_cam = (u_orig - cx) * z_depth / fx
                     y_cam = (v_orig - cy) * z_depth / fy
                     vec_hom = np.array([x_cam, y_cam, z_depth, 1.0])
