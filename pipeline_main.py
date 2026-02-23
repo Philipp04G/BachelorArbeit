@@ -200,7 +200,9 @@ def main():
                         # print(f"  [SKIP] Außerhalb Map: ({u_map}, {v_map})")
                         continue
                     
-                    z_depth = depth_map[v_map, u_map]
+                    # --- NEU: 3x3 Median Filter (Robuster gegen NaN-Löcher) ---
+                    window = depth_map[max(0, v_map-1):v_map+2, max(0, u_map-1):u_map+2]
+                    z_depth = np.nanmedian(window)
                     
                     # Validierung der Tiefe
                     if z_depth <= 0.1 or np.isnan(z_depth) or np.isinf(z_depth): 
@@ -213,9 +215,15 @@ def main():
                     x_cam = (u_orig - cx) * z_depth / fx
                     y_cam = (v_orig - cy) * z_depth / fy
                     vec_hom = np.array([x_cam, y_cam, z_depth, 1.0])
+
+                    gps_to_cam_left = np.array([[0, 0, -1, 0],
+                            [0, -1, 0, 0],
+                            [1, 0, 0, 0],
+                            [0, 0, 0, 1]]).astype(np.float32)
+                    cam_left_to_gps = np.linalg.inv(gps_to_cam_left)
                     
                     # Transformation in Welt-Koordinaten (Matrix @ Vektor)
-                    pos_world = T_world_cam @ vec_hom
+                    pos_world = T_world_cam @ vec_hom @ cam_left_to_gps
                     X_world, Y_world = pos_world[0], pos_world[1]
 
                     # --- G. SPEICHERN & ANZEIGE ---
