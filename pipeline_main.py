@@ -4,38 +4,62 @@ import csv
 import os
 from ultralytics import YOLO
 
-# --- IMPORTS DER MODULE ---
+# --- IMPORT DER MODULE ---
 from samson_data_reader.data_reader import DataReader
 from samson_data_reader.datacalsses import ImageData
+from samson_data_reader.utils.gps_conversion import meter_to_gps_coords_old
 
 # --- KONFIGURATION (PFADE ANPASSEN!) ---
+# --- Pfade für Laptop
 DATA_DIR = r"C:\Studium\BA_Projekt\DATEN"
 MODEL_PATH = r"C:\Studium\BA_Projekt\BachelorArbeit\YOLO_Modell\baum_thesis\versuch_3_higherRes_Aug_300Epochs\weights\best.pt"
 PATH_CALIB = r"C:\Studium\BA_Projekt\BachelorArbeit\SAMSON4_SAMSON3_stereo.yaml"
 
+# --- Pfade für PC
+DATA_DIR_PC = r"D:\Studium\BACHELOR ARBEIT\2024-04-15_10-59-41_Bluete_Elstar_Flaeche_A27_Esteburg_Sensorbox1"
+MODEL_PATH_PC = r"D:\Studium\BACHELOR ARBEIT\YOLO_Modell\baum_thesis\versuch_3_higherRes_Aug_300Epochs\weights\best.pt"
+PATH_CALIB_PC = r"D:\Studium\BACHELOR ARBEIT\BachelorArbeit\SAMSON4_SAMSON3_stereo.yaml"
+
 # --- EINSTELLUNGEN ---
 CSV_FILENAME = "gefundene_baeume.csv"
 TARGET_CLASS = 'trunk' # <--- HIER DEN GENAUEN NAMEN AUS DEM DATENSATZ EINTRAGEN!
-X_THRESHOLD = 30       # Pixel: Wie weit dürfen Segmente seitlich versetzt sein?
+X_THRESHOLD = 150       # Pixel: Wie weit dürfen Segmente seitlich versetzt sein?
 CONFIDENCE = 0.25      # YOLO Sicherheitsschwelle
 ROTATE_IMAGE = True    # True, wenn Bilder um 90° gedreht werden müssen
-MAX_DEPTH = 20.0       # Bäume weiter weg als 20m ignorieren
-SKIP_IMAGES = 10       # Nur jedes X-te Bild verarbeiten
+MAX_DEPTH = 5.0       # Bäume weiter weg als 5m ignorieren
+SKIP_IMAGES = 15       # Nur jedes X-te Bild verarbeiten
 
-def filter_vertical_segments(boxes, x_thresh=30):
+def filter_vertical_segments(boxes, x_thresh=150, overlap_thresh=0.3, pole_class_id=1):
     """
     Behält nur das unterste Segment eines Baumes (falls der Stamm zerteilt wurde).
-    Gibt die Indizes der Boxen zurück, die wir behalten wollen.
+    Prüft auch auf überlappende Boxen auf der X-Achse, um Mehrfacherkennungen 
+    am selben dicken Stamm zu verhindern.
     """
     if boxes is None or len(boxes) == 0:
         return []
 
     candidates = []
     for i, box in enumerate(boxes):
+        # 1. Klassen-ID der aktuellen Box auslesen
+        class_id = int(box.cls[0].item())
+        
+        # 2. Ist es ein Pfosten? -> Sofort überspringen!
+        if class_id == pole_class_id:
+            continue
+
         b = box.xyxy[0].cpu().numpy()
-        center_x = (b[0] + b[2]) / 2
-        y_bottom = b[3]
-        candidates.append({'id': i, 'center_x': center_x, 'y_bottom': y_bottom})
+        x1, y1, x2, y2 = b[0], b[1], b[2], b[3]
+        
+        center_x = (x1 + x2) / 2
+        y_bottom = y2
+        width = x2 - x1 # Breite der Box berechnen
+        
+        print(f"Baum gefunden auf X-Zentrum: {center_x:.1f}, Unten-Y: {y_bottom:.1f}")
+        
+        candidates.append({
+            'id': i, 'center_x': center_x, 'y_bottom': y_bottom,
+            'x1': x1, 'x2': x2, 'width': width
+        })
 
     # Sortieren von links nach rechts
     candidates.sort(key=lambda c: c['center_x'])
@@ -46,14 +70,27 @@ def filter_vertical_segments(boxes, x_thresh=30):
         group = [current]
         remaining = []
         
-        # Suche vertikal gestapelte Segmente
+        # Suche vertikal gestapelte ODER überlappende Segmente
         for other in candidates:
-            if abs(other['center_x'] - current['center_x']) < x_thresh:
+            # 1. Distanz der Zentren (wie bisher, aber leicht erhöhter Threshold)
+            dist_x = abs(other['center_x'] - current['center_x'])
+            
+            # 2. Horizontale Überlappung berechnen
+            # Wie viele Pixel überschneiden sich auf der X-Achse?
+            overlap_x = max(0, min(current['x2'], other['x2']) - max(current['x1'], other['x1']))
+            
+            # Verhältnis der Überlappung zur schmaleren der beiden Boxen
+            min_width = min(current['width'], other['width'])
+            overlap_ratio = overlap_x / min_width if min_width > 0 else 0
+            
+            # Wenn sie sehr nah beieinander liegen ODER sich stark überlappen -> Gruppe!
+            if dist_x < x_thresh or overlap_ratio > overlap_thresh:
                 group.append(other)
             else:
                 remaining.append(other)
         
         candidates = remaining
+        
         # Nimm das unterste Segment (größtes Y -> Boden)
         lowest = max(group, key=lambda c: c['y_bottom'])
         keep_indices.append(lowest['id'])
@@ -79,11 +116,11 @@ def main():
     # 1. Reader starten
     print("Initialisiere DataReader...")
     reader = DataReader(
-        path_data_dir=DATA_DIR,
+        path_data_dir=DATA_DIR_PC, # Pfad wenn nötig anpassen
         rectify_images=True,
         stereo_images=False,
         load_dvso=True,               # WICHTIG: Lädt Tiefe & Trajektorie
-        path_camera_calib_left=PATH_CALIB, # Expliziter Pfad zur Kalibrierung
+        path_camera_calib_left=PATH_CALIB_PC, # Expliziter Pfad zur Kalibrierung, wenn nötig anpassen
         load_gps=False,
         load_lidar=False,
         load_object_detection=False
@@ -91,7 +128,7 @@ def main():
     
     # 2. Modell laden
     print(f"Lade Modell von {MODEL_PATH}...")
-    model = YOLO(MODEL_PATH)
+    model = YOLO(MODEL_PATH_PC) # Hier Pfad wenn nötig anpassen
     print(f"Erkannte Klassen im Modell: {model.names}") # Zur Kontrolle im Terminal
 
     # 3. CSV Datei öffnen
@@ -99,21 +136,19 @@ def main():
     with open(CSV_FILENAME, mode='w', newline='') as f:
         writer = csv.writer(f)
         # Header schreiben
-        writer.writerow(["Image_ID", "Tree_Index", "Class", "X_Global", "Y_Global", "Z_Tiefe_lokal"])
+        writer.writerow(["Image_ID", "X_Global", "Y_Global", "Z_Tiefe_lokal"])
 
         image_counter = 0 # Zähler für Skip-Funktion
 
-        print("Starte Verarbeitung... (Drücke 'q' im Bildfenster zum Beenden)")
+        #print("Starte Verarbeitung... (Drücke 'q' im Bildfenster zum Beenden)")  # Zum manuellen überprüfen ob das modell funktionier
 
         for data in reader:
             # Nur vollständige Bild-Daten verarbeiten
             if not isinstance(data, ImageData): continue
 
-            # --- 1. JEDES 10. BILD LOGIK ---
+            # --- 1. JEDES 15. BILD LOGIK ---
             image_counter += 1
             if image_counter % SKIP_IMAGES != 0:
-                # Überspringe dieses Bild, aber gib kurzes Feedback
-                # print(f"Skippe Bild {image_counter}...") 
                 continue
 
 
@@ -157,7 +192,6 @@ def main():
                     class_name = model.names[cls_id]
                     
                     if class_name != TARGET_CLASS:
-                        # print(f"  -> Ignoriere {class_name}")
                         continue
                     
                     # 3. Kontur & Ankerpunkt holen
@@ -171,8 +205,8 @@ def main():
                     
                     # Zeichnen (Box & Punkt)
                     box = results[0].boxes[idx].xyxy[0].cpu().numpy().astype(int)
-                    cv2.rectangle(annotated_frame, (box[0], box[1]), (box[2], box[3]), (0, 255, 0), 2)
-                    cv2.circle(annotated_frame, (u_curr, v_curr), 5, (0, 0, 255), -1)
+                    #cv2.rectangle(annotated_frame, (box[0], box[1]), (box[2], box[3]), (0, 255, 0), 2) # Nur für manuelle Überprüfung des Models notwendig
+                    #cv2.circle(annotated_frame, (u_curr, v_curr), 5, (0, 0, 255), -1) # Nur für manuelle Überprüfung des Models notwendig
 
                     # --- C. KOORDINATEN RÜCK-RECHNEN ---
                     if ROTATE_IMAGE:
@@ -183,8 +217,7 @@ def main():
                         u_orig, v_orig = u_curr, v_curr
 
                     # --- D. SKALIERUNG FÜR TIEFENKARTE ---
-                    # Das Originalbild ist z.B. 1000x1000, die Map aber nur 200x200 
-                    # TODO !!!!! Vielleicht hier ein fehler??????
+                    # Da Zmap kleiner als orignalbild 
                     h_img, w_img = image.shape[:2]
                     h_map, w_map = depth_map.shape[:2]
                     
@@ -197,7 +230,6 @@ def main():
 
                     # --- E. TIEFE HOLEN ---
                     if not (0 <= v_map < h_map and 0 <= u_map < w_map):
-                        # print(f"  [SKIP] Außerhalb Map: ({u_map}, {v_map})")
                         continue
                     
                     # --- NEU: 3x3 Median Filter (Robuster gegen NaN-Löcher) ---
@@ -216,37 +248,41 @@ def main():
                     y_cam = (v_orig - cy) * z_depth / fy
                     vec_hom = np.array([x_cam, y_cam, z_depth, 1.0])
 
-                    gps_to_cam_left = np.array([[0, 0, -1, 0],
+                    gps_to_cam_left = np.array([
+                            [0, 0, -1, 0],
                             [0, -1, 0, 0],
                             [1, 0, 0, 0],
                             [0, 0, 0, 1]]).astype(np.float32)
                     cam_left_to_gps = np.linalg.inv(gps_to_cam_left)
                     
                     # Transformation in Welt-Koordinaten (Matrix @ Vektor)
-                    pos_world = T_world_cam @ vec_hom @ cam_left_to_gps
-                    X_world, Y_world = pos_world[0], pos_world[1]
-
+                    pos_world = T_world_cam  @ gps_to_cam_left @ vec_hom #cam_left_to_gps
+                    X_world, Y_world, Z_world = pos_world[0], pos_world[1], pos_world[2]
+                    gps_coords = meter_to_gps_coords_old(X_world, Y_world, Z_world)
                     # --- G. SPEICHERN & ANZEIGE ---
-                    print(f"Bild {data.image_id}: {class_name} bei X={X_world:.2f}m, Y={Y_world:.2f}m (Z={z_depth:.1f}m)")
+                    #print(f"Bild {data.image_id}: {class_name} bei X={gps_coords[0]:.2f}m, Y={gps_coords[1]:.2f}m (Z={gps_coords[2]:.1f}m)")
                     
                     # CSV schreiben
-                    writer.writerow([data.image_id, idx, class_name, f"{X_world:.4f}", f"{Y_world:.4f}", f"{z_depth:.2f}"])
+                    writer.writerow([data.image_id, f"{gps_coords[0]:.8f}", f"{gps_coords[1]:.8f}", f"{z_depth:.2f}"])
+                    
+                    # Erzwingt sofortiges Speichern der Zeile auf Festplatte
+                    f.flush()
                     
                     # Text ins Bild malen
-                    label_text = f"X:{X_world:.1f} Y:{Y_world:.1f}"
-                    cv2.putText(annotated_frame, label_text, (box[0], box[1]-10), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+                    #label_text = f"X:{gps_coords[0]:.1f} Y:{gps_coords[1]:.1f}" # Nur für manuelle Überprüfung des Models notwendig
+                    #cv2.putText(annotated_frame, label_text, (box[0], box[1]-10), # Nur für manuelle Überprüfung des Models notwendig
+                    #           cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2) # Nur für manuelle Überprüfung des Models notwendig
 
             # --- H. BILD ANZEIGEN ---
             # Zeigt das Bild an und wartet UNENDLICH lange auf Tastendruck
-            cv2.imshow("Tree Pipeline", annotated_frame)
-            key = cv2.waitKey(0) # 0 = Warten bis Taste gedrückt wird
+            #cv2.imshow("Tree Pipeline", annotated_frame) # Nur für manuelle Überprüfung des Models notwendig
+            #key = cv2.waitKey(0) # 0 = Warten bis Taste gedrückt wird # Nur für manuelle Überprüfung des Models notwendig
             
-            if key == ord('q'): 
-                print("Abbruch durch Benutzer.")
-                break
+            #if key == ord('q'): # Nur für manuelle Überprüfung des Models notwendig
+                #print("Abbruch durch Benutzer.") # Nur für manuelle Überprüfung des Models notwendig
+                #break # Nur für manuelle Überprüfung des Models notwendig
 
-    cv2.destroyAllWindows()
+    #cv2.destroyAllWindows()
     print(f"Fertig! Daten gespeichert in {CSV_FILENAME}")
 
 if __name__ == "__main__":
