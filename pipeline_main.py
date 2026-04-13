@@ -22,7 +22,7 @@ PATH_CALIB_PC = r"D:\Studium\BACHELOR ARBEIT\BachelorArbeit\SAMSON4_SAMSON3_ster
 
 # --- EINSTELLUNGEN ---
 CSV_FILENAME = "gefundene_baeume.csv"
-TARGET_CLASS = 'trunk' # <--- HIER DEN GENAUEN NAMEN AUS DEM DATENSATZ EINTRAGEN!
+TARGET_CLASS = 'trunk' # HIER DEN GENAUEN NAMEN AUS DEM DATENSATZ EINTRAGEN!
 X_THRESHOLD = 150       # Pixel: Wie weit dürfen Segmente seitlich versetzt sein?
 CONFIDENCE = 0.25      # YOLO Sicherheitsschwelle
 ROTATE_IMAGE = True    # True, wenn Bilder um 90° gedreht werden müssen
@@ -72,7 +72,7 @@ def filter_vertical_segments(boxes, x_thresh=150, overlap_thresh=0.3, pole_class
         
         # Suche vertikal gestapelte ODER überlappende Segmente
         for other in candidates:
-            # 1. Distanz der Zentren (wie bisher, aber leicht erhöhter Threshold)
+            # 1. Distanz der Zentren
             dist_x = abs(other['center_x'] - current['center_x'])
             
             # 2. Horizontale Überlappung berechnen
@@ -91,7 +91,7 @@ def filter_vertical_segments(boxes, x_thresh=150, overlap_thresh=0.3, pole_class
         
         candidates = remaining
         
-        # Nimm das unterste Segment (größtes Y -> Boden)
+        # unterste Segment wählen (größtes Y -> Boden)
         lowest = max(group, key=lambda c: c['y_bottom'])
         keep_indices.append(lowest['id'])
 
@@ -140,7 +140,7 @@ def main():
 
         image_counter = 0 # Zähler für Skip-Funktion
 
-        #print("Starte Verarbeitung... (Drücke 'q' im Bildfenster zum Beenden)")  # Zum manuellen überprüfen ob das modell funktionier
+        print("Starte Verarbeitung... (Drücke 'q' im Bildfenster zum Beenden)")  # Zum manuellen überprüfen ob das modell funktionier
 
         for data in reader:
             # Nur vollständige Bild-Daten verarbeiten
@@ -168,7 +168,7 @@ def main():
                 process_image = image
 
             # Kopie zum Malen
-            annotated_frame = process_image.copy()
+            annotated_frame = process_image.copy() # Zum manuellen überprüfen
 
             # --- A. YOLO INFERENCE ---
             results = model(process_image, conf=CONFIDENCE, verbose=False)
@@ -205,8 +205,8 @@ def main():
                     
                     # Zeichnen (Box & Punkt)
                     box = results[0].boxes[idx].xyxy[0].cpu().numpy().astype(int)
-                    #cv2.rectangle(annotated_frame, (box[0], box[1]), (box[2], box[3]), (0, 255, 0), 2) # Nur für manuelle Überprüfung des Models notwendig
-                    #cv2.circle(annotated_frame, (u_curr, v_curr), 5, (0, 0, 255), -1) # Nur für manuelle Überprüfung des Models notwendig
+                    cv2.rectangle(annotated_frame, (box[0], box[1]), (box[2], box[3]), (0, 255, 0), 2) # Nur für manuelle Überprüfung des Models notwendig
+                    cv2.circle(annotated_frame, (u_curr, v_curr), 5, (0, 0, 255), -1) # Nur für manuelle Überprüfung des Models notwendig
 
                     # --- C. KOORDINATEN RÜCK-RECHNEN ---
                     if ROTATE_IMAGE:
@@ -269,20 +269,20 @@ def main():
                     f.flush()
                     
                     # Text ins Bild malen
-                    #label_text = f"X:{gps_coords[0]:.1f} Y:{gps_coords[1]:.1f}" # Nur für manuelle Überprüfung des Models notwendig
-                    #cv2.putText(annotated_frame, label_text, (box[0], box[1]-10), # Nur für manuelle Überprüfung des Models notwendig
-                    #           cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2) # Nur für manuelle Überprüfung des Models notwendig
+                    label_text = f"X:{gps_coords[0]:.1f} Y:{gps_coords[1]:.1f}" # Nur für manuelle Überprüfung des Models notwendig
+                    cv2.putText(annotated_frame, label_text, (box[0], box[1]-10), # Nur für manuelle Überprüfung des Models notwendig
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2) # Nur für manuelle Überprüfung des Models notwendig
 
             # --- H. BILD ANZEIGEN ---
             # Zeigt das Bild an und wartet UNENDLICH lange auf Tastendruck
-            #cv2.imshow("Tree Pipeline", annotated_frame) # Nur für manuelle Überprüfung des Models notwendig
-            #key = cv2.waitKey(0) # 0 = Warten bis Taste gedrückt wird # Nur für manuelle Überprüfung des Models notwendig
+            cv2.imshow("Tree Pipeline", annotated_frame) # Nur für manuelle Überprüfung des Models notwendig
+            key = cv2.waitKey(0) # 0 = Warten bis Taste gedrückt wird # Nur für manuelle Überprüfung des Models notwendig
             
-            #if key == ord('q'): # Nur für manuelle Überprüfung des Models notwendig
-                #print("Abbruch durch Benutzer.") # Nur für manuelle Überprüfung des Models notwendig
-                #break # Nur für manuelle Überprüfung des Models notwendig
+            if key == ord('q'): # Nur für manuelle Überprüfung des Models notwendig
+                print("Abbruch durch Benutzer.") # Nur für manuelle Überprüfung des Models notwendig
+                break # Nur für manuelle Überprüfung des Models notwendig
 
-    #cv2.destroyAllWindows()
+    cv2.destroyAllWindows()
     print(f"Fertig! Daten gespeichert in {CSV_FILENAME}")
 
 if __name__ == "__main__":
